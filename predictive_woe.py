@@ -132,6 +132,45 @@ def create_base(_undersample,undersample_rate, _save_fig,data_pipeline, target,e
     print('\n*** Distribution by target value ***')
     base2.groupBy(target).count().show()
     
+    # Create batches for faster processing
+    base = (df1.join(df_seg, ['party_id', 'cmdb_partition'], 'left').withColumn('rnum',F.row_number().over(W.orderBy('party_id'))))
+    # Replace empty strings to None string or null
+    n_batch = 20
+    batch_size = int(n_sample/n_batch)
+    total_nulls = {}
+    dfs = {}
+    print('\n*** Replace empty strings to None string or null...***')
+    for i in range(n_batch):
+        print('*** batch :' + str(i+1) + ' out of ' + str(n_batch) + ' with a size of ' + str(batch_size))
+        lb = i* batch_size + 1
+        ub = i * batch_size + batch_size
+        df_b = base.filter((F.col('rnum') >= lb) & (F.col('rnum') <= ub))
+        for c in df_b.drop(*except_for_these).columns:
+            if c in cat:
+                df_b = df_b.withColumn(c, F.when((F.col(c) == '') | (F.col(c) == ' ') | (F.col(c).isNull()), F.lit('None')).otherwise(F.col(c)))
+            if c in num:
+                df_b = (df_b.withColumn(c, F.when((F.col(c) == '') | (F.col(c) == ' '), F.lit(None)).otherwise(F.col(c)))
+                           .withColumn(c, F.col(c).cast('double')))
+            nulls = df_b.select(c).filter((F.col(c).isNull()) | (F.col(c) == 'None')).count()
+            total_nulls.setdefault(c, []).append(nulls)
+        dfs[str(i)]=df_b
+    
+    drop_list = []
+    for col, nulls in total_nulls.items():
+        print('Column : ' + col + ' - null count : ' + str(nulls))
+        if sum(nulls) > 0:
+            drop_list.append(col)
+    
+    print('\n*** Drop list ***')
+    print(str(drop_list))
+    
+    print('\n*** Merge batches into one data frame...')
+    from functools import reduce
+    def unionAll(dfs):
+        return reduce(lambda df1, df2: df1.unionByName(df2), dfs)
+    base2 = (unionAll(list(dfs.values())).drop(*drop_list))
+    print('*** Merged as base2 ...')
+    
     #Check imbalance - weighting for the minority class
     total_size = float(base2.count())
     tp_size = float(base2.select(target).filter(F.col(target) == 1).count())
