@@ -252,12 +252,10 @@ def create_sample(df, target, num, cat, n_feat, sample_set):
                               .select('*', F.count('*').over(W.partitionBy('feat_name')).alias('feat_total'), F.count('*').over(W.partitionBy('feat_name', 'bucket')).alias('all'), \
                                      F.sum(target).over(W.partitionBy('feat_name', 'bucket')).alias('event'))
                               .withColumn('nonevent', F.col('all')-F.col('event'))
-                              .withColumn('event', F.when(F.col('event') == 0, .5).otherwise(F.col('event')))
-                              .withColumn('nonevent', F.when(F.col('nonevent') == 0, .5).otherwise(F.col('nonevent')))
                               .withColumn('tot_event', F.sum(target).over(W.partitionBy('feat_name')))
                               .withColumn('tot_nonevent', F.col('feat_total')-F.col('tot_event'))
-                              .withColumn('pct_event', F.col('event')/F.col('tot_event'))
-                              .withColumn('pct_nonevent', F.col('nonevent')/F.col('tot_nonevent'))
+                              .withColumn('pct_event', F.round(F.when(F.col('event')==0, (.5/F.col('tot_event'))).otherwise(F.col('event')/F.col('tot_event')), 3))
+                              .withColumn('pct_nonevent', F.round(F.when(F.col('nonevent')==0, (.5/F.col('tot_nonevent'))).otherwise(F.col('nonevent')/F.col('tot_nonevent')), 3))
                               .withColumn('woe', F.log(F.col('pct_nonevent')/F.col('pct_event')))
                               .withColumn('iv', F.col('woe')*(F.col('pct_nonevent')-F.col('pct_event')))
                               .select('feat_name','bucket','all','event','tot_event','nonevent','tot_nonevent','pct_event','pct_nonevent','woe','iv')
@@ -269,20 +267,19 @@ def create_sample(df, target, num, cat, n_feat, sample_set):
     # Categorical
     for c in cat:
         df_cat = (df.withColumn('feat_name', F.lit(c)).withColumnRenamed(c, 'bucket')
-                              .select('*', F.count('*').over(W.partitionBy('feat_name')).alias('feat_total'), F.count('*').over(W.partitionBy('feat_name', 'bucket')).alias('all'), \
-                                     F.sum(target).over(W.partitionBy('feat_name', 'bucket')).alias('event'))
-                              .withColumn('nonevent', F.col('all')-F.col('event'))
-                              .withColumn('event', F.when(F.col('event') == 0, .5).otherwise(F.col('event')))
-                              .withColumn('nonevent', F.when(F.col('nonevent') == 0, .5).otherwise(F.col('nonevent')))
-                              .withColumn('tot_event', F.sum(target).over(W.partitionBy('feat_name')))
-                              .withColumn('tot_nonevent', F.col('feat_total')-F.col('tot_event'))
-                              .withColumn('pct_event', F.col('event')/F.col('tot_event'))
-                              .withColumn('pct_nonevent', F.col('nonevent')/F.col('tot_nonevent'))
-                              .withColumn('woe', F.log(F.col('pct_nonevent')/F.col('pct_event')))
-                              .withColumn('iv', F.col('woe')*(F.col('pct_nonevent')-F.col('pct_event')))
-                              .select('feat_name','bucket','all','event','tot_event','nonevent','tot_nonevent','pct_event','pct_nonevent','woe','iv')
-                              .distinct()
-                              .orderBy('feat_name', 'bucket'))
+                  .select('*', F.count('*').over(W.partitionBy('feat_name')).alias('feat_total'), \
+                          F.count('*').over(W.partitionBy('feat_name', 'bucket')).alias('event+non_event'), \
+                          F.sum(target).over(W.partitionBy('feat_name', 'bucket')).alias('event'))
+                  .withColumn('nonevent', F.col('event+non_event')-F.col('event'))
+                  .withColumn('tot_event', F.sum(target).over(W.partitionBy('feat_name')))
+                  .withColumn('tot_nonevent', F.col('feat_total')-F.col('tot_event'))
+                  .withColumn('pct_event', F.round(F.when(F.col('event')==0, (.5/F.col('tot_event'))).otherwise(F.col('event')/F.col('tot_event')), 3))
+                  .withColumn('pct_nonevent', F.round(F.when(F.col('nonevent')==0, (.5/F.col('tot_nonevent'))).otherwise(F.col('nonevent')/F.col('tot_nonevent')),3))
+                  .withColumn('woe', F.log(F.col('pct_nonevent')/F.col('pct_event')))
+                  .withColumn('iv', F.col('woe')*(F.col('pct_nonevent')-F.col('pct_event')))
+                  .select('feat_name','bucket','event+non_event','event','tot_event','nonevent','tot_nonevent','pct_event','pct_nonevent')
+                  .distinct()
+                  .orderBy('feat_name', 'bucket'))
         df_tmp = df_cat.toPandas()
         woe_iv = woe_iv.append(df_tmp, ignore_index=True)
     
