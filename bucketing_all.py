@@ -1,3 +1,32 @@
+def pickVars(tmp1, tmp2, df_woe,except_for_these, lb, ub):
+    '''
+    Create a data set, df_woe, with select features
+    '''
+    ivCalc = spark.table(tmp1)
+    df_bucketed = spark.table(tmp2)
+    
+    ivCalc.persist()
+    df_bucketed.persist()
+    
+    print('\n*** Selected features with IV between ' + str(lb)+ ' and ' + str(ub) + ' from the above table ***')
+    select_feat = ivCalc.filter((F.col('iv') >= lb) & (F.col('iv') <= ub)).select('feat_name').rdd.flatMap(lambda x:x).collect()
+    
+    df_model = df_bucketed.select(*except_for_these, *[x+'_woe' for x in select_feat])
+    df_model.persist()
+    df_model.write.mode('overwrite').saveAsTable(df_woe)
+    print('\n*** Finished creating a final data set with WOE for fitting...')
+    
+    ivCalc.unpersist()
+    df_bucketed.unpersist()
+    df_model.unpersist()
+    
+def indexCategorical(df,except_for_these):
+    indexer = [StringIndexer(inputCol=s[0], outputCol=s[0]+'_indexed',handleInvalid='keep') for s in df.drop(*except_for_these).dtypes if s[1] == 'string']
+#    encoder = [OneHotEncoderEstimator(inputCols=[s[0]+'_indexed'],outputCols=[s[0]+"_encoded"],handleInvalid='keep') for s in df.drop(*except_for_these).dtypes if s[1] == 'string']
+    pipeline = Pipeline(stages=indexer)
+    df2 = pipeline.fit(df).transform(df)
+    return df2
+
 def process_sample(df_final, target,except_for_these, n_feat, tmp1, tmp2):
     '''
     Calculate WOE/IV, select features based on IV, replace variable values with WOEs
