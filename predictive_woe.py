@@ -78,17 +78,31 @@ def main():
 #    from sklearn.linear_model import LogisticRegression
 #    clf = LogisticRegression(solver='lbfgs', max_iter=20000, class_weight='balanced', random_state=_seed, n_jobs=-1)
     
-    from sklearn.ensemble import RandomForestClassifier
-    clf = RandomForestClassifier(n_estimators=150, max_depth=15, criterion='entropy', class_weight='balanced', random_state=_seed, n_jobs=-1)
-    
+    #from sklearn.ensemble import RandomForestClassifier
+    #clf = RandomForestClassifier(n_estimators=150, max_depth=15, criterion='entropy', class_weight='balanced', random_state=_seed, n_jobs=-1)
+    from sklearn.linear_model import LogisticRegression
+    clf = LogisticRegression(solver='lbfgs', class_weight='balanced', random_state=_seed, n_jobs=-1, penality='elasticnet', l1_ratio=.5)
+        
+    ## Gridsearch to tune hyperparameters
+        from sklearn.model_selection import GridSearchCV
+        param_grid = {
+                        'max_iter':list(range(1000,20000,100))
+                    }
+    grid_search = GridSearchCV(estimator=clf, param_grid=param_grid, cv=5, error_score=0)
+    grid_search.fit(X_train, y_train)
+
+    print('*** Best parameters....')
+    print(grid_search.best_params_)
+    best_clf = grid_search.best_estimator_
+        
     # Cross Validation
-    fitModelCV(5, clf, X_train, y_train, X_test, y_test)
+    fitModelCV(5, best_clf, X_train, y_train, X_test, y_test)
     # Non-CV
-#    fitModel(clf, X_train, X_test, y_train, y_test)
+#    fitModel(best_clf, X_train, X_test, y_train, y_test)
     
     # Plot graphics - Life and Gain
-    scores_train = scoring(X_train,clf,y_train)
-    scores_test = scoring(X_test,clf,y_test)
+    scores_train = scoring(X_train,best_clf,y_train)
+    scores_test = scoring(X_test,best_clf,y_test)
     lift_train = pd.concat([X_train,scores_train],axis=1)
     lift_test = pd.concat([X_test,scores_test],axis=1)
     
