@@ -9,7 +9,7 @@ def vifTest(df, except_for_these, vif_threshold):
     vif_max = vif_threshold + 1
     def vif_cal(df, vif_max, colnum_max, vif_threshold):
         vif_max = vif_threshold
-        for i in range(2,len(cols)):
+        for i in range(len(cols)):
             train_t = df.rdd.map(lambda x: [Vectors.dense(x[2:i]+x[i+1:]), x[i]]).toDF(['features', 'label'])
             lr = LinearRegression(featuresCol = 'features', labelCol = 'label')
             predictions = lr.fit(train_t).transform(train_t)
