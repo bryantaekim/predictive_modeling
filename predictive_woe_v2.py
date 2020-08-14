@@ -5,10 +5,12 @@ Created on Tue Aug 11 10:23:47 2020
 @title: Predictive model using Weight of Evidence
 
 @data sets:
-    select * from pred2_stopped_2006;
-    select * from pred2_surrender_2006;
-    select * from pred2_restart_2006;
-
+    select * from *.pred2_stopped_2006;
+    select * from *.pred2_surrender_2006;
+    select * from *.pred2_restart_2006;
+@target audience:
+    403b_k12_policies > 0
+    
 @target month: 20/06
     30 days out from - 20/05
     60 days out from - 20/04
@@ -36,9 +38,10 @@ from pyspark.sql.types import *
 from pyspark.ml.feature import Bucketizer, StringIndexer, OneHotEncoderEstimator
 from pyspark.ml import Pipeline
 
-import pandas as pd, numpy as np, pickle, matplotlib.pyplot as plt
+import pandas as pd, numpy as np, pickle, matplotlib.pyplot as plt, sys
 from scipy import interp
 from datetime import datetime
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_curve, auc, accuracy_score, f1_score, confusion_matrix
 from sklearn.model_selection import train_test_split,StratifiedKFold,cross_val_score
 from sklearn.externals import joblib
@@ -62,129 +65,451 @@ sqlContext.setConf("spark.sql.crossJoin.enabled", "true")
 sqlContext.setConf("spark.sql.broadcastTimeout", "36000")
 sqlContext.setConf("spark.default.parallelism", "300")
 
-model_loc = '...'
+model_loc = '/home/bkim/predictive_model/model/'
 
 def main():
     
     print('*** Started at  *** : ' + format(datetime.today(), '%Y-%m-%d %H:%M:%S'))
     
-    _trainModel1 = False
+    _trainModel1 = False 
+    _trainModel2 = _trainModel3 = True
+    
     _predictModel1 = False
-    
-    _trainModel2 = True
-    _predictModel2 = False
-    
-    _trainModel3 = True
+    _predictModel2 = False  
     _predictModel3 = False
 
     
     if _trainModel1:
-        input_tbl = 'pred2_stopped_2006'
+        input_tbl = '*.pred2_stopped_2006'
         targets = ['stopped_30', 'stopped_60', 'stopped_90', 'stopped_120']
         except_for_these =  ['party_id','cmdb_partition']
         
-        target = 'stopped_60'
-        month_to_target = '2004'
-        encodeString = False
-        idx_tbl = '.pred2_stopped60_idx'
-        bin_tbl = '.pred2_stopped60_bin'
-        woeiv_tbl = '.pred2_stopped60_woeiv'
-        end_tbl = '.pred2_stopped60'
-        n_feature = 100
-        n_bin = 10
-        iv_lb = 0
-        iv_ub = .5
-        split_rate = .2
-        fig_name = 'pred2_stopped60'
-        save_fig = True
-        model_name = 'gr_stopped60.model'
+        params_30 = {'target' : 'stopped_30',
+        'month_to_target' : '2005',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_stopped30_idx',
+        'bin_tbl' : '*.pred2_stopped30_bin',
+        'woeiv_tbl' : '*.pred2_stopped30_woeiv',
+        'end_tbl' : '*.pred2_stopped30',
+        'n_feature' : 100,
+        'n_bin' : 10,
+        'iv_lb' : 0,
+        'iv_ub' : 100,
+        'split_rate' : .2,
+        'balThreshold' : 1,
+        'use_wgt' : False,
+        'fig_name' : 'pred2_stopped30',
+        'save_fig' : True,
+        'model_name' : 'gr_stopped30.model'
+        }
         
-        modelDriver(input_tbl, 1, \
-                  targets, target, except_for_these, month_to_target, \
-                  encodeString, idx_tbl, n_bin, bin_tbl, woeiv_tbl, end_tbl, \
-                  n_feature, iv_lb, iv_ub, split_rate, \
-                  fig_name, save_fig, \
-                  model_name)
+        params_60 = {'target' : 'stopped_60',
+        'month_to_target' : '2004',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_stopped60_idx',
+        'bin_tbl' : '*.pred2_stopped60_bin',
+        'woeiv_tbl' : '*.pred2_stopped60_woeiv',
+        'end_tbl' : '*.pred2_stopped60',
+        'n_feature' : 100,
+        'n_bin' : 10,
+        'iv_lb' : 0,
+        'iv_ub' : 100,
+        'split_rate' : .2,
+        'balThreshold' : 1,
+        'use_wgt' : False,
+        'fig_name' : 'pred2_stopped60',
+        'save_fig' : True,
+        'model_name' : 'gr_stopped60.model'
+        }
         
-    if _predictModel1:
+        params_90 = {'target' : 'stopped_90',
+        'month_to_target' : '2003',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_stopped90_idx',
+        'bin_tbl' : '*.pred2_stopped90_bin',
+        'woeiv_tbl' : '*.pred2_stopped90_woeiv',
+        'end_tbl' : '*.pred2_stopped90',
+        'n_feature' : 100,
+        'n_bin' : 10,
+        'iv_lb' : 0,
+        'iv_ub' : 100,
+        'split_rate' : .2,
+        'balThreshold' : 1,
+        'use_wgt' : False,
+        'fig_name' : 'pred2_stopped90',
+        'save_fig' : True,
+        'model_name' : 'gr_stopped90.model'
+        }
         
-        print('*** START - scoring new data set ...')
-        input_tbl = '.pred2_stopped_2005'
-        targets = ['stopped_30', 'stopped_60', 'stopped_90', 'stopped_120']
-        except_for_these =  ['party_id','cmdb_partition']
+        params_120 = {'target' : 'stopped_120',
+        'month_to_target' : '2002',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_stopped120_idx',
+        'bin_tbl' : '*.pred2_stopped120_bin',
+        'woeiv_tbl' : '*.pred2_stopped120_woeiv',
+        'end_tbl' : '*.pred2_stopped120',
+        'n_feature' : 100,
+        'n_bin' : 10,
+        'iv_lb' : 0,
+        'iv_ub' : 100,
+        'split_rate' : .2,
+        'balThreshold' : 1,
+        'use_wgt' : False,
+        'fig_name' : 'pred2_stopped120',
+        'save_fig' : True,
+        'model_name' : 'gr_stopped120.model'
+        }
         
-        model_name = 'gr_stopped60.model'
-        target = 'stopped_60'
-        month_to_target = '2003'
-        encodeString = True
-        idx_tbl = '.pred2_stopped60_idx_2005'
-        bin_tbl = '.pred2_stopped60_bin_2005'
-        woeiv_tbl = '.pred2_stopped60_woeiv_2005'
-        end_tbl = '.pred2_stopped60_2005'
-        n_bin = 10
-        
-        predictDriver(input_tbl, targets, except_for_these, model_name, target, month_to_target, encodeString, \
-                      idx_tbl, bin_tbl, woeiv_tbl, end_tbl, n_bin)
-        
+        for p in [params_30, params_90, params_120]:
+            modelDriver(input_tbl, 1, \
+                  targets, p['target'], except_for_these, p['month_to_target'], \
+                  p['encodeString'], p['idx_tbl'], p['n_bin'], p['bin_tbl'], p['woeiv_tbl'], p['end_tbl'], \
+                  p['n_feature'], p['iv_lb'], p['iv_ub'], p['split_rate'], p['balThreshold'], p['use_wgt'], \
+                  p['fig_name'], p['save_fig'], \
+                  p['model_name'])        
 
     if _trainModel2:
-        input_tbl = 'us_marketing_usecase.pred2_surrender_2006'
+        input_tbl = '*.pred2_surrender_2006'
         targets = ['surrender_30', 'surrender_60', 'surrender_90', 'surrender_120']
         except_for_these =  ['party_id','cmdb_partition']
         
-        target = 'surrender_60'
-        month_to_target = '2004'
-        encodeString = True
-        idx_tbl = '.pred2_surrender60_idx'
-        bin_tbl = '.pred2_surrender60_bin'
-        woeiv_tbl = '.pred2_surrender60_woeiv'
-        end_tbl = '.pred2_surrender60'
-        n_feature = 100
-        n_bin = 10
-        iv_lb = 0
-        iv_ub = .5
-        split_rate = .2
-        fig_name = 'pred2_surrender60'
-        save_fig = True
-        model_name = 'gr_surrender60.model'
+        params_30 = {'target' : 'surrender_30',
+        'month_to_target' : '2005',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_surrender30_idx',
+        'bin_tbl' : '*.pred2_surrender30_bin',
+        'woeiv_tbl' : '*.pred2_surrender30_woeiv',
+        'end_tbl' : '*.pred2_surrender30',
+        'n_feature' : 100,
+        'n_bin' : 10,
+        'iv_lb' : 0,
+        'iv_ub' : 100,
+        'split_rate' : .2,
+        'balThreshold' : 1,
+        'use_wgt' : False,
+        'fig_name' : 'pred2_surrender30',
+        'save_fig' : True,
+        'model_name' : 'gr_surrender30.model'
+        }
         
-        modelDriver(input_tbl, 1, \
-                  targets, target, except_for_these, month_to_target, \
-                  encodeString, idx_tbl, n_bin, bin_tbl, woeiv_tbl, end_tbl, \
-                  n_feature, iv_lb, iv_ub, split_rate, \
-                  fig_name, save_fig, \
-                  model_name)
+        params_60 = {'target' : 'surrender_60',
+        'month_to_target' : '2004',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_surrender60_idx',
+        'bin_tbl' : '*.pred2_surrender60_bin',
+        'woeiv_tbl' : '*.pred2_surrender60_woeiv',
+        'end_tbl' : '*.pred2_surrender60',
+        'n_feature' : 100,
+        'n_bin' : 10,
+        'iv_lb' : 0,
+        'iv_ub' : 100,
+        'split_rate' : .2,
+        'balThreshold' : 1,
+        'use_wgt' : False,
+        'fig_name' : 'pred2_surrender60',
+        'save_fig' : True,
+        'model_name' : 'gr_surrender60.model'
+        }
+        
+        params_90 = {'target' : 'surrender_90',
+        'month_to_target' : '2003',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_surrender90_idx',
+        'bin_tbl' : '*.pred2_surrender90_bin',
+        'woeiv_tbl' : '*.pred2_surrender90_woeiv',
+        'end_tbl' : '*.pred2_surrender90',
+        'n_feature' : 100,
+        'n_bin' : 10,
+        'iv_lb' : 0,
+        'iv_ub' : 100,
+        'split_rate' : .2,
+        'balThreshold' : 1,
+        'use_wgt' : False,
+        'fig_name' : 'pred2_surrender90',
+        'save_fig' : True,
+        'model_name' : 'gr_surrender90.model'
+        }
+        
+        params_120 = {'target' : 'surrender_120',
+        'month_to_target' : '2002',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_surrender120_idx',
+        'bin_tbl' : '*.pred2_surrender120_bin',
+        'woeiv_tbl' : '*.pred2_surrender120_woeiv',
+        'end_tbl' : '*.pred2_surrender120',
+        'n_feature' : 100,
+        'n_bin' : 10,
+        'iv_lb' : 0,
+        'iv_ub' : 100,
+        'split_rate' : .2,
+        'balThreshold' : 1,
+        'use_wgt' : False,
+        'fig_name' : 'pred2_surrender120',
+        'save_fig' : True,
+        'model_name' : 'gr_surrender120.model'
+        }
+        
+        for p in [params_30, params_90, params_120]:
+            modelDriver(input_tbl, 1, \
+                  targets, p['target'], except_for_these, p['month_to_target'], \
+                  p['encodeString'], p['idx_tbl'], p['n_bin'], p['bin_tbl'], p['woeiv_tbl'], p['end_tbl'], \
+                  p['n_feature'], p['iv_lb'], p['iv_ub'], p['split_rate'], p['balThreshold'], p['use_wgt'], \
+                  p['fig_name'], p['save_fig'], \
+                  p['model_name'])
     
     if _trainModel3:
-        input_tbl = '.pred2_restart_2006'
+        input_tbl = '*.pred2_restart_2006'
         targets = ['restart_30', 'restart_60', 'restart_90', 'restart_120']
         except_for_these =  ['party_id','cmdb_partition']
         
-        target = 'restart_60'
-        month_to_target = '2004'
-        encodeString = True
-        idx_tbl = '.pred2_restart60_idx'
-        bin_tbl = '.pred2_restart60_bin'
-        woeiv_tbl = '.pred2_restart60_woeiv'
-        end_tbl = '.pred2_restart60'
-        n_feature = 100
-        n_bin = 10
-        iv_lb = 0
-        iv_ub = .5
-        split_rate = .2
-        fig_name = 'pred2_restart60'
-        save_fig = True
-        model_name = 'gr_restart60.model'
+        params_30 = {'target' : 'restart_30',
+        'month_to_target' : '2005',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_restart30_idx',
+        'bin_tbl' : '*.pred2_restart30_bin',
+        'woeiv_tbl' : '*.pred2_restart30_woeiv',
+        'end_tbl' : '*.pred2_restart30',
+        'n_feature' : 100,
+        'n_bin' : 10,
+        'iv_lb' : 0,
+        'iv_ub' : 100,
+        'split_rate' : .2,
+        'balThreshold' : 1,
+        'use_wgt' : False,
+        'fig_name' : 'pred2_restart30',
+        'save_fig' : True,
+        'model_name' : 'gr_restart30.model'
+        }
         
-        modelDriver(input_tbl, 1, \
-                  targets, target, except_for_these, month_to_target, \
-                  encodeString, idx_tbl, n_bin, bin_tbl, woeiv_tbl, end_tbl, \
-                  n_feature, iv_lb, iv_ub, split_rate, \
-                  fig_name, save_fig, \
-                  model_name)
+        params_60 = {'target' : 'restart_60',
+        'month_to_target' : '2004',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_restart60_idx',
+        'bin_tbl' : '*.pred2_restart60_bin',
+        'woeiv_tbl' : '*.pred2_restart60_woeiv',
+        'end_tbl' : '*.pred2_restart60',
+        'n_feature' : 100,
+        'n_bin' : 10,
+        'iv_lb' : 0,
+        'iv_ub' : 100,
+        'split_rate' : .2,
+        'balThreshold' : 1,
+        'use_wgt' : False,
+        'fig_name' : 'pred2_restart60',
+        'save_fig' : True,
+        'model_name' : 'gr_restart60.model'
+        }
+        
+        params_90 = {'target' : 'restart_90',
+        'month_to_target' : '2003',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_restart90_idx',
+        'bin_tbl' : '*.pred2_restart90_bin',
+        'woeiv_tbl' : '*.pred2_restart90_woeiv',
+        'end_tbl' : '*.pred2_restart90',
+        'n_feature' : 100,
+        'n_bin' : 10,
+        'iv_lb' : 0,
+        'iv_ub' : 100,
+        'split_rate' : .2,
+        'balThreshold' : 1,
+        'use_wgt' : False,
+        'fig_name' : 'pred2_restart90',
+        'save_fig' : True,
+        'model_name' : 'gr_restart90.model'
+        }
+        
+        params_120 = {'target' : 'restart_120',
+        'month_to_target' : '2002',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_restart120_idx',
+        'bin_tbl' : '*.pred2_restart120_bin',
+        'woeiv_tbl' : '*.pred2_restart120_woeiv',
+        'end_tbl' : '*.pred2_restart120',
+        'n_feature' : 100,
+        'n_bin' : 10,
+        'iv_lb' : 0,
+        'iv_ub' : 100,
+        'split_rate' : .2,
+        'balThreshold' : 1,
+        'use_wgt' : False,
+        'fig_name' : 'pred2_restart120',
+        'save_fig' : True,
+        'model_name' : 'gr_restart120.model'
+        }
+        
+        for p in [params_30, params_90, params_120]:
+            modelDriver(input_tbl, 1, \
+                  targets, p['target'], except_for_these, p['month_to_target'], \
+                  p['encodeString'], p['idx_tbl'], p['n_bin'], p['bin_tbl'], p['woeiv_tbl'], p['end_tbl'], \
+                  p['n_feature'], p['iv_lb'], p['iv_ub'], p['split_rate'], p['balThreshold'], p['use_wgt'], \
+                  p['fig_name'], p['save_fig'], \
+                  p['model_name'])
+            
     
+    if _predictModel1:
+        
+        print('*** START - scoring new data set ...')
+        input_tbl = '*.pred2_stopped_2005'
+        targets = ['stopped_30', 'stopped_60', 'stopped_90', 'stopped_120']
+        except_for_these =  ['party_id','cmdb_partition']
+        
+        params_30 = {'model_name' : 'gr_stopped30.model',
+        'target' : 'stopped_30',
+        'month_to_target' : '2004',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_stopped30_idx_2005',
+        'bin_tbl' : '*.pred2_stopped30_bin_2005',
+        'woeiv_tbl' : '*.pred2_stopped30_woeiv_2005',
+        'end_tbl' : '*.pred2_stopped30_2005',
+        'n_bin' : 10
+        }
+        
+        params_60 = {'model_name' : 'gr_stopped60.model',
+        'target' : 'stopped_60',
+        'month_to_target' : '2003',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_stopped60_idx_2005',
+        'bin_tbl' : '*.pred2_stopped60_bin_2005',
+        'woeiv_tbl' : '*.pred2_stopped60_woeiv_2005',
+        'end_tbl' : '*.pred2_stopped60_2005',
+        'n_bin' : 10
+        }
+        
+        params_90 = {'model_name' : 'gr_stopped90.model',
+        'target' : 'stopped_90',
+        'month_to_target' : '2002',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_stopped90_idx_2005',
+        'bin_tbl' : '*.pred2_stopped90_bin_2005',
+        'woeiv_tbl' : '*.pred2_stopped90_woeiv_2005',
+        'end_tbl' : '*.pred2_stopped90_2005',
+        'n_bin' : 10
+        }
+        
+        params_120 = {'model_name' : 'gr_stopped120.model',
+        'target' : 'stopped_120',
+        'month_to_target' : '2001',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_stopped120_idx_2005',
+        'bin_tbl' : '*.pred2_stopped120_bin_2005',
+        'woeiv_tbl' : '*.pred2_stopped120_woeiv_2005',
+        'end_tbl' : '*.pred2_stopped120_2005',
+        'n_bin' : 10
+        }
+        
+        for p in [params_30, params_90, params_120]:
+            predictDriver(input_tbl, targets, except_for_these, p['model_name'], p['target'], p['month_to_target'], p['encodeString'], p['idx_tbl'], p['bin_tbl'], p['woeiv_tbl'], p['end_tbl'], p['n_bin'])
+        
+    if _predictModel2:
+        
+        print('*** START - scoring new data set ...')
+        input_tbl = '*.pred2_surrender_2005'
+        targets = ['surrender_30', 'surrender_60', 'surrender_90', 'surrender_120']
+        except_for_these =  ['party_id','cmdb_partition']
+              
+        params_30 = {'model_name' : 'gr_surrender30.model',
+        'target' : 'surrender_30',
+        'month_to_target' : '2004',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_surrender30_idx_2005',
+        'bin_tbl' : '*.pred2_surrender30_bin_2005',
+        'woeiv_tbl' : '*.pred2_surrender30_woeiv_2005',
+        'end_tbl' : '*.pred2_surrender30_2005',
+        'n_bin' : 10
+        }
+        
+        params_60 = {'model_name' : 'gr_surrender60.model',
+        'target' : 'surrender_60',
+        'month_to_target' : '2003',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_surrender60_idx_2005',
+        'bin_tbl' : '*.pred2_surrender60_bin_2005',
+        'woeiv_tbl' : '*.pred2_surrender60_woeiv_2005',
+        'end_tbl' : '*.pred2_surrender60_2005',
+        'n_bin' : 10
+        }
+        
+        params_90 = {'model_name' : 'gr_surrender90.model',
+        'target' : 'surrender_90',
+        'month_to_target' : '2002',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_surrender90_idx_2005',
+        'bin_tbl' : '*.pred2_surrender90_bin_2005',
+        'woeiv_tbl' : '*.pred2_surrender90_woeiv_2005',
+        'end_tbl' : '*.pred2_surrender90_2005',
+        'n_bin' : 10
+        }
+        
+        params_120 = {'model_name' : 'gr_surrender120.model',
+        'target' : 'surrender_120',
+        'month_to_target' : '2001',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_surrender120_idx_2005',
+        'bin_tbl' : '*.pred2_surrender120_bin_2005',
+        'woeiv_tbl' : '*.pred2_surrender120_woeiv_2005',
+        'end_tbl' : '*.pred2_surrender120_2005',
+        'n_bin' : 10
+        }
+        
+        for p in [params_30, params_90, params_120]:
+            predictDriver(input_tbl, targets, except_for_these, p['model_name'], p['target'], p['month_to_target'], p['encodeString'], p['idx_tbl'], p['bin_tbl'], p['woeiv_tbl'], p['end_tbl'], p['n_bin'])
     
-    print('*** Finished at *** : ' + format(datetime.today(), '%Y-%m-%d %H:%M:%S'))
+    if _predictModel3:
+        
+        print('*** START - scoring new data set ...')
+        input_tbl = '*.pred2_restart_2005'
+        targets = ['restart_30', 'restart_60', 'restart_90', 'restart_120']
+        except_for_these =  ['party_id','cmdb_partition']
+        
+        params_30 = {'model_name' : 'gr_restart30.model',
+        'target' : 'restart_30',
+        'month_to_target' : '2004',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_restart30_idx_2005',
+        'bin_tbl' : '*.pred2_restart30_bin_2005',
+        'woeiv_tbl' : '*.pred2_restart30_woeiv_2005',
+        'end_tbl' : '*.pred2_restart30_2005',
+        'n_bin' : 10
+        }
+        
+        params_60 = {'model_name' : 'gr_restart60.model',
+        'target' : 'restart_60',
+        'month_to_target' : '2003',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_restart60_idx_2005',
+        'bin_tbl' : '*.pred2_restart60_bin_2005',
+        'woeiv_tbl' : '*.pred2_restart60_woeiv_2005',
+        'end_tbl' : '*.pred2_restart60_2005',
+        'n_bin' : 10
+        }
+        
+        params_90 = {'model_name' : 'gr_restart90.model',
+        'target' : 'restart_90',
+        'month_to_target' : '2002',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_restart90_idx_2005',
+        'bin_tbl' : '*.pred2_restart90_bin_2005',
+        'woeiv_tbl' : '*.pred2_restart90_woeiv_2005',
+        'end_tbl' : '*.pred2_restart90_2005',
+        'n_bin' : 10
+        }
+        
+        params_120 = {'model_name' : 'gr_restart120.model',
+        'target' : 'restart_120',
+        'month_to_target' : '2001',
+        'encodeString' : True,
+        'idx_tbl' : '*.pred2_restart120_idx_2005',
+        'bin_tbl' : '*.pred2_restart120_bin_2005',
+        'woeiv_tbl' : '*.pred2_restart120_woeiv_2005',
+        'end_tbl' : '*.pred2_restart120_2005',
+        'n_bin' : 10
+        }
+        
+        for p in [params_30, params_90, params_120]:
+            predictDriver(input_tbl, targets, except_for_these, p['model_name'], p['target'], p['month_to_target'], p['encodeString'], p['idx_tbl'], p['bin_tbl'], p['woeiv_tbl'], p['end_tbl'], p['n_bin'])
+    
+    print('*** Finished at *** : ' + format(datetime.today(), '%Y-%m-%d %H:%M:%S \n\n'))
     spark.stop()
 
 def predictDriver(input_tbl, targets, except_for_these, model_name, target, month_to_target, encodeString, \
@@ -192,8 +517,9 @@ def predictDriver(input_tbl, targets, except_for_these, model_name, target, mont
     '''
     Load the trained model to score a new data set. Save a prediction table.
     '''
+    
     targets.remove(target)
-    ds = spark.table(input_tbl).drop(*targets).filter(F.col('cmdb_partition') == month_to_target)
+    ds = spark.table(input_tbl).drop(*targets).filter((F.col('403b_k12_policies') > 0) & (F.col('cmdb_partition') == month_to_target))
     processSample(ds, except_for_these, target, n_bin, idx_tbl, bin_tbl, woeiv_tbl, end_tbl, encodeString)
     
     ## Load the model and features to score new data set
@@ -201,8 +527,6 @@ def predictDriver(input_tbl, targets, except_for_these, model_name, target, mont
     
     with open(model_loc + target + '_feature_list', 'rb') as r:
          clf_features = pickle.load(r)
-         
-#    clf_features = ['age_band_indexed_woe', 'owner_zip_first3_indexed_woe', 'clients_with_email_woe', 'hh_networth_woe', '401k_policies_woe', '401k_clients_woe', 'term_policies_woe', 'scs_policies_woe', 'wl_policies_woe', 'rc_clients_woe', 'indeqv_policies_woe', 'active_policies_woe', 'pol_vulner_cd_indexed_woe', 'ul_policies_woe', '457_clients_woe', 'minority_group_indexed_woe', '403b_k12_aum_woe', 'vl_clients_woe', 'gender_indexed_woe', 'education_level_indexed_woe', 'renewal_premium_paid_woe', 'asso_clients_woe', 'broker_accounts_woe', 'home_bus_indexed_woe', 'age_at_first_purch_woe', 'accum_clients_woe', 'call_calls_woe', 'age_at_last_issue_woe', 'ie_policies_woe', 'ie_clients_woe']
     print('*** Model ' + model_name + ' is loaded...')
     
     ## Score the new data 
@@ -241,7 +565,7 @@ def predictDriver(input_tbl, targets, except_for_these, model_name, target, mont
 def modelDriver(input_tbl, undersample_rate, \
               targets, target, except_for_these, month_to_target, \
               encodeString, idx_tbl, n_bin, bin_tbl, woeiv_tbl, end_tbl, \
-              n_feature, iv_lb, iv_ub, split_rate, \
+              n_feature, iv_lb, iv_ub, split_rate, balThreshold, use_wgt, \
               fig_name, save_fig, \
               model_name):
     '''
@@ -251,15 +575,14 @@ def modelDriver(input_tbl, undersample_rate, \
     4. classifer
     5. joblib.dump
     '''
-
-    ds = checkImbalance(input_tbl, 1, targets, target, month_to_target)
+    print('\n****************** Training a model ******************') 
+    ds = checkImbalance(input_tbl, 1, balThreshold, use_wgt, targets, target, month_to_target)
     processSample(ds, except_for_these, target, n_bin, idx_tbl, bin_tbl, woeiv_tbl, end_tbl, encodeString)
     
-    ## Feature selection - stepwise
-    print('*** Select features using stepwise method ***')        
+    ## Feature selection - stepwise       
     import feature_selection as fs
     
-    final_vars = pickVars(woeiv_tbl, bin_tbl, except_for_these + [target], 0, .5, n_feature)
+    final_vars = pickVars(woeiv_tbl, bin_tbl, except_for_these + [target], iv_lb, iv_ub, n_feature)
     df = (spark.table(end_tbl).toPandas())
     X = df[[x + '_woe' for x in final_vars]]
     y = df[target]
@@ -269,6 +592,20 @@ def modelDriver(input_tbl, undersample_rate, \
     ## Export features to a pickle
     with open(model_loc + target + '_feature_list','wb') as w:
         pickle.dump(features, w)
+        
+    print('*** Influence of predictors with regard to target variable ***')
+    ## '_woe' = 4
+    influence = (spark.table(woeiv_tbl).filter(F.col('feat_name').isin([x[:-4] for x in features]))
+    .select('feat_name', 'bucket', 'pct_event').orderBy(['feat_name','pct_event'], ascending=[0,0])
+    )
+    influence.show(2000, truncate=False)    
+    
+    for f in [x[:-4] for x in features]:
+        if '_indexed' in f:
+            sql = 'select ' + f + '_bucket, min(' + f[:-8] + ') as lb, max(' + f[:-8] + ') as ub from ' + bin_tbl + ' group by 1 order by 1'
+        else:
+            sql = 'select ' + f + '_bucket, min(' + f + ') as lb, max(' + f + ') as ub from ' + bin_tbl + ' group by 1 order by 1'
+        spark.sql(sql).show(truncate=False)
 
     clf = classifier(end_tbl, target, except_for_these, features, split_rate, fig_name, save_fig)
     
@@ -276,21 +613,37 @@ def modelDriver(input_tbl, undersample_rate, \
     joblib.dump(clf, model_loc + model_name)
     print('*** Saved a trained model... ***')
     
-def checkImbalance(input_tbl, undersample_rate, targets, target, cmdb):
+def checkImbalance(input_tbl, undersample_rate, balThreshold, use_wgt, targets, target, cmdb):
     
-    print('*** Checks imbalance in data... \n')
+    print('*** Checks imbalance in data...')
     targets.remove(target)
-    ds = spark.table(input_tbl).drop(*targets)
+    df = spark.table(input_tbl).drop(*targets)
     
     print('*** Distribution by target value ***' + target)
-    ds.filter(F.col('cmdb_partition') == cmdb).groupBy(target).count().show()
+    ### 403b_k12_policies > 0
+    ds = df.filter((F.col('403b_k12_policies') > 0) & (F.col('cmdb_partition') == cmdb))
+    ds.groupBy(target).count().show()
+    
+     ## Check imbalance - weighting for the minority class (Tp)
+    total_size = float(ds.count())
+    tp_size = float(ds.select(target).filter(F.col(target) == 1).count())
+    tn_size = float(total_size - tp_size)
+    if tp_size/tn_size < balThreshold:
+        print("Imbalance issue exists....target vs non-target ratio : " + str(tp_size/tn_size))
+        if use_wgt:
+            class_weight = tn_size / total_size
+            ds = ds.withColumn('classWeight', F.when(F.col(target) == 0, class_weight).otherwise(1-class_weight))
+        else:
+            pass
+    else:
+        pass
     
     print('*** Undersampling major class (non-event) due to imbalanced data ***')
-    base_tp = ds.filter((F.col(target) == 1) & (F.col('cmdb_partition') == cmdb))
+    base_tp = ds.filter(F.col(target) == 1)
     _count = base_tp.count()
     
     print('*** Non-event target size :' + str(_count*undersample_rate))
-    base_tn = (ds.filter((F.col(target) == 0) & (F.col('cmdb_partition') == cmdb))
+    base_tn = (ds.filter(F.col(target) == 0)
             .withColumn('rand_num', F.lit(F.rand(_seed)))
             .withColumn('row_num', F.row_number().over(W.orderBy('rand_num')))
             .filter(F.col('row_num') <= _count*undersample_rate)
@@ -300,12 +653,12 @@ def checkImbalance(input_tbl, undersample_rate, targets, target, cmdb):
     return df
 
         
-def processSample(ds, exclusion, target, n_bin, idx_tbl, bin_tbl, woeiv_tbl, result_tbl, encodeString):
+def processSample(ds, exclusion, target, n_bin, idx_tbl, bin_tbl, woeiv_tbl, result_tbl, encodeString = True):
     '''
     bucketize, calculate WOE/IV, apply WOE
     exclusion : nominal columns such as party_id and cmdb_partition
     '''
-    print('*** Processing ' + target + ' - bucketize, calculate WOE/IV, apply WOE *** ')
+    print('*** Start of Processing ' + target + ' - bucketize, calculate WOE/IV, apply WOE *** ')
 
     ## Indexing
     if encodeString:
@@ -319,7 +672,7 @@ def processSample(ds, exclusion, target, n_bin, idx_tbl, bin_tbl, woeiv_tbl, res
     calculateIV(bin_tbl, target, decoded_cols, woeiv_tbl)
     useWOE(bin_tbl, exclusion + [target], woeiv_tbl, result_tbl)
     
-    print('*** Processing *** Finished \n')
+    print('*** End of Processing ***')
     
  
 def classifier(tbl, target, except_for_these, features, split, filename,_save_fig):
@@ -337,8 +690,7 @@ def classifier(tbl, target, except_for_these, features, split, filename,_save_fi
     X_test = X_test_meta[X_test_meta.columns.difference(except_for_these)]
     ## Classifiers
     print('\n*** Fits a model ***')
-    from sklearn.linear_model import LogisticRegression
-    clf = LogisticRegression(max_iter=20000,solver='lbfgs',random_state=_seed)
+    clf = LogisticRegression(class_weight='balanced', max_iter=20000,solver='lbfgs',random_state=_seed)
         
 #    from sklearn.ensemble import RandomForestClassifier
 #    clf = RandomForestClassifier(criterion='entropy', class_weight='balanced', max_features='auto', random_state=_seed, n_jobs=-1)
@@ -346,7 +698,7 @@ def classifier(tbl, target, except_for_these, features, split, filename,_save_fi
     ## Gridsearch to tune hyperparameters
     from sklearn.model_selection import GridSearchCV
     param_grid = {
-                    'C':[.55,.6]
+                    'C':[.5,.55,.6]
                 }
 #    param_grid = {
 #                    'n_estimators':list(range(250,300,10))
@@ -403,7 +755,7 @@ def pickVars(woe_iv,bucketed,exclusion, lb, ub, n_feat):
     '''
     woe_iv = spark.table(woe_iv)    
     
-    print('\n*** Feature importance by Information Value, Top ' + str(n_feat) + ' features ***')
+    print('*** Feature importance by Information Value, Top ' + str(n_feat) + ' features ***')
     ivCalc = woe_iv.groupby('feat_name').agg(F.sum('iv').alias('iv')).orderBy('iv', ascending=False)
     ivCalc.show(n_feat, truncate=False)
     
@@ -432,7 +784,7 @@ def useWOE(df_b,except_for_these,woe,result):
     woe_iv.persist()
     df_bucketed.persist() 
         
-    print('\n*** Replace values with WOEs ***')    
+    print('*** Replace values with WOEs ***')    
     woe_list = [row.asDict() for row in woe_iv.select('feat_name','bucket','woe').collect()]
     def woe_mapper(feat, bucket):
         for d in woe_list:
@@ -447,7 +799,7 @@ def useWOE(df_b,except_for_these,woe,result):
     df_bucketed2 = df_bucketed.drop(*[x for x in df_bucketed.columns if x.endswith('_bucket')])
     df_bucketed2.write.mode('overwrite').saveAsTable(result)
     print('\n*** Saved df_bucketed having WOEs ***')
-    df_bucketed2.show(truncate=False)
+#    df_bucketed2.show(truncate=False)
     
     woe_iv.unpersist()
     df_bucketed.unpersist()
@@ -482,14 +834,13 @@ def calculateIV(df_b,target, decoded_cols, woeiv_tbl):
     d.unpersist()
     
     woe_iv = spark.createDataFrame(woe_iv)
-    woe_iv.persist()
-    print('*** WOE/IV Table ***')
-    woe_iv.show(truncate=False)
+#    woe_iv.show(truncate=False)
     woe_iv.write.mode('overwrite').saveAsTable(woeiv_tbl)
+    print('*** WOE/IV Table is saved *** ' + woeiv_tbl)
    
 def bucketize(df, target, except_for_these, n_bin, df_b):
     df.persist()    
-    
+    print('*** Start of classing ***')
     decoded_cols = []
     col_decile = {}
     for c in df.drop(*except_for_these, target).dtypes:
@@ -513,7 +864,7 @@ def bucketize(df, target, except_for_these, n_bin, df_b):
     df_bucketed = pipeline.fit(df).transform(df)
     df_bucketed.persist()
     df_bucketed.write.mode('overwrite').saveAsTable(df_b)
-    print('*** Saved buckets...')
+    print('*** End of classing ***')
 #    print('*** Decoded columns ***')
 #    print(str(decoded_cols))
     
@@ -527,19 +878,19 @@ def indexCategorical(df,except_for_these, target):
     except_for_these : columns to exclude (list)
     target : target variable (str)
     '''
-    print('*** Encodes string variables...')
+    print('*** Start of indexing string variables...')
     indexer = [StringIndexer(inputCol=s[0], outputCol=s[0]+'_indexed',handleInvalid='keep') for s in df.drop(*except_for_these, target).dtypes if s[1] == 'string']
 #    encoder = [OneHotEncoderEstimator(inputCols=[s[0]+'_indexed'],outputCols=[s[0]+"_encoded"],handleInvalid='keep') for s in df.drop(*except_for_these, target).dtypes if s[1] == 'string']
     pipeline = Pipeline(stages=indexer)
     df2 = pipeline.fit(df).transform(df)
-    
-    df2.show(truncate=False)
+#    df2.show(truncate=False)
+    print('*** End of indexing string variables...')
     return df2     
 
 
 def splitDataset(df_model,target,except_for_these, split):
 #    X = df_model[df_model.columns.difference(except_for_these)]
-    train, test = train_test_split(df_model, test_size = split, random_state=_seed)
+    train, test = train_test_split(df_model, test_size = split, random_state=_seed, stratify = df_model[[target]] )
     train = train.reset_index(drop=True)
     test = test.reset_index(drop=True)
     
@@ -577,7 +928,7 @@ def fitModelCV(n_splits, clf, except_for_these, X_train_meta, y_train, X_test_me
     aucs = []
     mean_fpr = np.linspace(0, 1, 100)
     
-    cv = StratifiedKFold(n_splits=n_splits)
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True)
     for i, (train, test) in enumerate(cv.split(X_train, y_train)):
         clf.fit(X_train.iloc[train], y_train.iloc[train])
         fpr, tpr, _ = roc_curve(y_train.iloc[test], clf.predict_proba(X_train.iloc[test])[:,1])
@@ -634,8 +985,8 @@ def fitModelCV(n_splits, clf, except_for_these, X_train_meta, y_train, X_test_me
     coeff_mtx['prob_against']=coeff_mtx['odds'].apply(lambda x: 1 / (1+x))
     
     coeff_mtx2 = spark.createDataFrame(coeff_mtx)
-    coeff_mtx2.write.mode('overwrite').saveAsTable('.pred2_coeff_mtx_'+filename)
-    coeff_mtx2.show(2000, truncate=False)
+    coeff_mtx2.write.mode('overwrite').saveAsTable('*.pred2_coeff_mtx_'+filename)
+#    coeff_mtx2.show(2000, truncate=False)
     print('*** Coefficient/Odds ratio set is saved....')
     
     print('\n*** *********************************** ***')
@@ -660,7 +1011,7 @@ def fitModelCV(n_splits, clf, except_for_these, X_train_meta, y_train, X_test_me
 #    df_test_prediction = pd.concat([X_test_meta,y_test,predictions, new_target], axis=1)
     
 #    df_test_pred = spark.createDataFrame(df_test_prediction)
-#    df_test_pred.write.mode('overwrite').saveAsTable('.pred2_prediction_'+filename)
+#    df_test_pred.write.mode('overwrite').saveAsTable('*.pred2_prediction_'+filename)
 #    df_test_pred.show(truncate=False)
 #    print('*** Prediction set is saved....')
 
