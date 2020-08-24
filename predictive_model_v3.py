@@ -79,7 +79,8 @@ def predictDriver(input_tbl, targets, except_for_these, model_name, target, mont
     print('*** Model Performance against new data set ' + input_tbl + ' ***')
     print('*** *********************************** ***')
     
-    meta_data = spark.table(input_tbl).filter(F.col('cmdb_partition') == month_to_target).toPandas()
+    tmp = spark.table(end_tbl).filter(F.col('cmdb_partition') == month_to_target).persist()
+    cols = tmp.drop(target, *except_for_these).columns
     
     tmp = spark.table(end_tbl).drop(target, *except_for_these).persist()
     cols = tmp.columns
@@ -91,7 +92,7 @@ def predictDriver(input_tbl, targets, except_for_these, model_name, target, mont
             pass
     
     features = tmp.select(*clf_features).toPandas()
-    actual_target = spark.table(end_tbl).select(target).toPandas()
+    actual_target = tmp.select(target).toPandas()
     predict_target = clf.predict(features)
     
     tmp.unpersist()
@@ -110,10 +111,12 @@ def predictDriver(input_tbl, targets, except_for_these, model_name, target, mont
     print(confusion_matrix(np.array(actual_target), predict_target))    
     
     predictions = pd.DataFrame({'pred_prob_0':clf.predict_proba(features)[:,0], 'pred_prob_1':clf.predict_proba(features)[:,1]})
+    predictions['decile'] = pd.qcut(predictions['pred_prob_1'].rank(method = 'first'), 10, labels = range(10,0,-1)).astype(float)
     new_target = pd.DataFrame({'predicted_target':predict_target})
     meta_pid = meta_data[[target,'party_id']]
     df_test_prediction = pd.concat([meta_pid, predictions, new_target], axis=1)
     
+    tmp.unpersist()
     df_test_pred = spark.createDataFrame(df_test_prediction)
     df_test_pred.write.mode('overwrite').saveAsTable(input_tbl + '_prediction_' + target)
     
@@ -134,6 +137,20 @@ def modelDriver(input_tbl, targets, target, except_for_these, month_to_target, \
     df = (spark.table(end_tbl).toPandas())
     X = df[[x + '_woe' for x in final_vars]]
     y = df[target]
+    
+    ## Multicollinearity check
+    vif = checkVif(X)
+
+    while vif['vif'][vif['vif'] > 10].any():
+        remove = vif.sort_values('vif',ascending=0)['features'][:1]
+        print(remove)
+        X.drop(remove, axis=1, inplace=True)
+        vif = engine.checkVif(X)
+
+    print('*** VIF analysis is completed and features are selected with VIF <= 10.')
+    print(list(vif['features']))
+
+    ## Feature selection - stepwise
     features = fs.stepwise_selection(X, y, threshold_in, threshold_out)
     print('resulting features:' + str(features))
     
@@ -192,6 +209,17 @@ def processSample(input_tbl, exclusion, targets, target, n_bin, idx_tbl, bin_tbl
     useWOE(bin_tbl, exclusion + [target], woeiv_tbl, result_tbl)
     
     print('*** End of Processing ***')
+
+def checkVif(features):
+    # Multicollinearity check
+    print('*** Checking Variance Inflation Factor ...')
+    from statsmodels.stats.outliers_influence import variance_inflation_factor
+    vif = pd.DataFrame()
+#    df_numeric = features.select_dtypes(exclude=['object'])
+    
+    vif["features"] = features.columns
+    vif["vif"] = [variance_inflation_factor(features.values, i) for i in range(features.shape[1])]    
+    return vif
 
 def pickVars(woe_iv,bucketed,exclusion, lb, ub, n_feat):
     '''
