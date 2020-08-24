@@ -145,7 +145,7 @@ def modelDriver(input_tbl, targets, target, except_for_these, month_to_target, \
         remove = vif.sort_values('vif',ascending=0)['features'][:1]
         print(remove)
         X.drop(remove, axis=1, inplace=True)
-        vif = engine.checkVif(X)
+        vif = checkVif(X)
 
     print('*** VIF analysis is completed and features are selected with VIF <= 10.')
     print(list(vif['features']))
