@@ -78,12 +78,9 @@ def predictDriver(input_tbl, targets, except_for_these, model_name, target, mont
     print('\n*** *********************************** ***')
     print('*** Model Performance against new data set ' + input_tbl + ' ***')
     print('*** *********************************** ***')
-    
-    tmp = spark.table(end_tbl).filter(F.col('cmdb_partition') == month_to_target).persist()
+        
+    tmp = spark.table(end_tbl).persist()
     cols = tmp.drop(target, *except_for_these).columns
-    
-    tmp = spark.table(end_tbl).drop(target, *except_for_these).persist()
-    cols = tmp.columns
 
     for f in clf_features:
         if f not in cols:
@@ -95,17 +92,50 @@ def predictDriver(input_tbl, targets, except_for_these, model_name, target, mont
     actual_target = tmp.select(target).toPandas()
     predict_target = clf.predict(features)
     
-    tmp.unpersist()
-    
     score = clf.score(features, actual_target)
-    print('Score: {0:.2f} %'.format(100 * score))
+    print('Score: {0:.3f} %'.format(100 * score))
+   
+#    f1_test = f1_score(actual_target, predict_target)
+#    print('F1 score : {0:.3f}'.format(f1_test))
     
-    f1_test = f1_score(actual_target, predict_target)
-    print('Test set F1 score : {0:.2f}'.format(f1_test))
+    fpr, tpr, thresholds = roc_curve(actual_target, clf.predict_proba(features)[:,1], pos_label=1)
     
-    fpr, tpr, _ = roc_curve(np.array(actual_target), clf.predict_proba(features)[:,1])
-    auc_test = auc(fpr,tpr)
-    print('Test set AUC : {0:.2f}'.format(auc_test))
+    ## Thresholding via Cost
+    ## FP (retention campaign fees) vs FN (loss of contributions) - which is more expensive?
+    def thresholdingCost(fpr, tpr, thresholds, actual_target, filename):
+        '''
+        FP (retention campaign fees) vs FN (loss of contributions) - which is more expensive?
+        '''
+        print('*** Best threshold minimizing the costs for FP and FN ***')
+        fnr = 1 - tpr
+
+        fp_cost = 1
+        fn_cost = 10
+
+        costs = (fpr * fp_cost + fnr * fn_cost) * actual_target.size
+        best = np.argmin(costs)
+        best_cost = np.round(costs[best])
+        best_threshold = np.round(thresholds[best], 3)
+
+        print('Best FPR : ' + str(fpr[best]))
+        print('Best TPR : ' + str(tpr[best]))
+
+        plt.ticklabel_format(style='plain')
+        plt.plot(thresholds, costs, label = 'cost ($)')
+        label = 'best cost: {} at threshold {}'.format(best_cost, best_threshold)
+        plt.axvline(best_threshold, linestyle = '--', lw = 2, color = 'black', label = label)
+        plt.xlabel('threshold')  
+        plt.ylabel('$')  
+        plt.title('Cost as a Function of Threshold')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(graph_loc + 'cost_threshold_'+filename+'.jpg')
+        plt.show()
+    
+    thresholdingCost(fpr, tpr, thresholds, actual_target, fig_name)
+    
+    auc_test = engine.auc(fpr,tpr)
+    print('** AUC : {0:.3f}'.format(auc_test))
     
     print('\n*** Confusion matrix ***')
     print(confusion_matrix(np.array(actual_target), predict_target))    
@@ -599,21 +629,21 @@ if __name__ == '__main__':
     if sys.argv[1] == 'train':
         with open(config_loc + sys.argv[2], 'r') as r:
             data = json.load(r)
-
-        for p in ['params_30', 'params_60', 'params_90', 'params_120']:
-            modelDriver(data['input_tbl'], data['targets'], data[p]['target'], data['except_for_these'], data[p]['month_to_target'], bool(data[p]['encodeString']), \
+        
+        for p in ['params_30', 'params_60', 'params_90','params_120']:
+            modelDriver(data['process_data'], data['input_tbl'], data['targets'], data[p]['target'], data['except_for_these'], data[p]['month_to_target'], data[p]['encodeString'], \
                   data[p]['idx_tbl'], int(data[p]['n_bin']), data[p]['bin_tbl'], data[p]['woeiv_tbl'], data[p]['end_tbl'], \
                   float(data['threshold_in']), float(data['threshold_out']), int(data[p]['n_feature']), float(data[p]['iv_lb']), float(data[p]['iv_ub']), \
-                  float(data[p]['split_rate']), data[p]['fig_name'], bool(data[p]['save_fig']), data['resample'], data[p]['model_name'])
+                  float(data[p]['split_rate']), data[p]['fig_name'], data['resample'], data[p]['model_name'], int(data['trainOnly']))
                 
     if sys.argv[1] == 'predict':
         with open(config_loc + sys.argv[2], 'r') as r:
             data = json.load(r)
             
         for p in ['params_30', 'params_60', 'params_90', 'params_120']:
-            predictDriver(data['input_tbl'], data['targets'], data['except_for_these'], data[p]['model_name'], data[p]['target'], \
-                          data[p]['month_to_target'], bool(data[p]['encodeString']), data[p]['idx_tbl'], data[p]['bin_tbl'], data[p]['woeiv_tbl'], \
-                          data[p]['end_tbl'], int(data[p]['n_bin']))
+            predictDriver(data['process_data'], data['input_tbl'], data['targets'], data['except_for_these'], data[p]['model_name'], data[p]['target'], \
+                          data[p]['month_to_target'], data[p]['encodeString'], data[p]['idx_tbl'], data[p]['bin_tbl'], data[p]['woeiv_tbl'], \
+                          data[p]['end_tbl'], data[p]['fig_name'], int(data[p]['n_bin']))
             
     print('*** Finished at *** : ' + format(datetime.today(), '%Y-%m-%d %H:%M:%S \n\n'))
     spark.stop()
