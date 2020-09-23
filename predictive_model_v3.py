@@ -344,35 +344,67 @@ def calculateIV(df_b,target, decoded_cols, woeiv_tbl):
 def bucketize(df, target, except_for_these, n_bin, df_b):
     df.persist()    
     print('*** Start of classing ***')
-    decoded_cols = []
-    col_decile = {}
-    for c in df.drop(target, *except_for_these).dtypes:
-#        if c[1] == 'string':
-#            min_ = float(df.select(c[0]+'_indexed').summary('min').collect()[0][1])
-#            max_ = float(df.select(c[0]+'_indexed').summary('max').collect()[0][1])
-#            if min_ < max_ and (max_ - min_ != 0):
-#                print(c[0] + str(np.linspace(min_, max_, 11).tolist()))
-#                cat += [c[0]]
-#                col_decile.setdefault(c[0], []).append(np.linspace(min_, max_, 11).tolist())
-        if c[0].endswith('_indexed') or c[1] not in ('string', 'timestamp'):
-            min_ = float(df.select(c[0]).summary('min').collect()[0][1])
-            max_ = float(df.select(c[0]).summary('max').collect()[0][1])
-            if min_ < max_ and (max_ - min_ != 0):
-                decoded_cols += [c[0]]
-                col_decile.setdefault(c[0], []).append(np.linspace(min_, max_, n_bin+1).tolist())
     
-    ### All variables in buckets
-    buckets = [Bucketizer(splits=col_decile[c][0], inputCol = c, outputCol = c+'_bucket', handleInvalid='keep') for c in decoded_cols]
+    ## Using min and max
+#    decoded_cols = []
+#    col_decile = {}
+#    for c in df.drop(target, *except_for_these).dtypes:
+##        if c[1] == 'string':
+##            min_ = float(df.select(c[0]+'_indexed').summary('min').collect()[0][1])
+##            max_ = float(df.select(c[0]+'_indexed').summary('max').collect()[0][1])
+##            if min_ < max_ and (max_ - min_ != 0):
+##                print(c[0] + str(np.linspace(min_, max_, 11).tolist()))
+##                cat += [c[0]]
+##                col_decile.setdefault(c[0], []).append(np.linspace(min_, max_, 11).tolist())
+#        if c[0].endswith('_indexed') or c[1] not in ('string', 'timestamp'):
+#            min_ = float(df.select(c[0]).summary('min').collect()[0][1])
+#            max_ = float(df.select(c[0]).summary('max').collect()[0][1])
+#            if min_ < max_ and (max_ - min_ != 0):
+#                decoded_cols += [c[0]]
+#                col_decile.setdefault(c[0], []).append(np.linspace(min_, max_, n_bin+1).tolist())
+#    
+#    ### All variables in buckets
+#    buckets = [Bucketizer(splits=col_decile[c][0], inputCol = c, outputCol = c+'_bucket', handleInvalid='keep') for c in decoded_cols]
+#    pipeline = Pipeline(stages=buckets)
+#    df_bucketed = pipeline.fit(df).transform(df)
+    
+    ## Using quantiles
+    decoded_cols = [c[0] for c in df.drop(target, *except_for_these).dtypes if c[0].endswith('_indexed') or c[1] not in ('string','timestamp')]
+    buckets = [QuantileDiscretizer(relativeError = .0001, handleInvalid = 'keep', numBuckets = n_bin, inputCol = c, outputCol = c+'_bucket') for c in decoded_cols]
     pipeline = Pipeline(stages=buckets)
     df_bucketed = pipeline.fit(df).transform(df)
     df_bucketed.persist()
-    df_bucketed.write.mode('overwrite').saveAsTable(df_b)
-    print('*** End of classing ***')
-#    print('*** Decoded columns ***')
-#    print(str(decoded_cols))
     
+    one_bucket = []
+    for c in decoded_cols:
+        if df_bucketed.agg(F.countDistinct(c+'_bucket')).collect()[0][0] == 1:
+            one_bucket.append(c)
+    print('** Re-binning for ' + str(one_bucket))
+    
+    dicts = {}
+    one_bucket2 = []
+    for c in one_bucket:
+        min_ = float(df.select(c).summary('min').collect()[0][1])
+        max_ = float(df.select(c).summary('max').collect()[0][1])
+        if min_ < max_ and (max_ - min_ != 0):
+            one_bucket2.append(c)
+            dicts.setdefault(c, []).append(np.linspace(min_, max_, n_bin*2+1).tolist())
+    
+    buckets2 = [Bucketizer(splits=dicts[c][0], inputCol = c, outputCol = c+'_bucket', handleInvalid = 'keep') for c in one_bucket2]
+    pipeline2 = Pipeline(stages=buckets2)
+    df_rebin = df.select(*except_for_these+one_bucket2)
+    df_bucketed2 = pipeline2.fit(df_rebin).transform(df_rebin)
+    df_bucketed2.persist()
+    
+    df_merged = df_bucketed.drop(*one_bucket2, *[c+'_bucket' for c in one_bucket2]).join(df_bucketed2, except_for_these, 'left')        
+    
+    df_merged.write.mode('overwrite').saveAsTable(df_b)
+    
+    print('*** End of classing ***')
+
     df.unpersist()
     df_bucketed.unpersist()
+    df_bucketed2.unpersist()
     
     return decoded_cols
 
